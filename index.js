@@ -2,7 +2,8 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
-const { MongoClient,  ServerApiVersion } = require('mongodb');
+const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -13,10 +14,6 @@ app.use(express.json());
 
 // MongoDB connection URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.gbi6src.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-
-require("dotenv").config();
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -29,8 +26,9 @@ const client = new MongoClient(uri, {
 // MongoDB Collections
 let petsCollection;
 let adoptionsCollection;
-let donationsCollection; // ✅ Add this line
+let donationsCollection;
 let campaignsCollection;
+let usersCollection;
 
 async function run() {
   try {
@@ -40,8 +38,9 @@ async function run() {
     // Assign collections
     petsCollection = db.collection("pets");
     adoptionsCollection = db.collection("adoptions");
-    donationsCollection = db.collection("donations"); // ✅ Add this line
+    donationsCollection = db.collection("donations");
     campaignsCollection = db.collection("campaigns");
+    usersCollection = db.collection("users");
 
     console.log("✅ Connected to MongoDB!");
   } catch (err) {
@@ -50,17 +49,33 @@ async function run() {
 }
 run();
 
+// ✅ POST new pet
+app.post("/pets", async (req, res) => {
+  try {
+    const newPet = req.body;
+    if (!newPet.name || !newPet.age || !newPet.category || !newPet.image) {
+      return res.status(400).send({ message: "Missing required pet fields" });
+    }
+
+    const result = await petsCollection.insertOne(newPet);
+    res.status(201).send({ message: "Pet added", result });
+  } catch (err) {
+    console.error("Error adding pet:", err);
+    res.status(500).send({ message: "Failed to add pet", error: err });
+  }
+});
+
+// ✅ POST user
 app.post('/users', async (req, res) => {
   const user = req.body;
   const existing = await usersCollection.findOne({ email: user.email });
   if (!existing) {
-    user.role = "user"; // default
+    user.role = "user";
     const result = await usersCollection.insertOne(user);
     return res.send(result);
   }
   res.send({ message: "User already exists" });
 });
-
 
 // ✅ GET pets route
 app.get("/pets", async (req, res) => {
@@ -78,8 +93,6 @@ app.get("/pets", async (req, res) => {
 });
 
 // ✅ GET single pet by ID
-const { ObjectId } = require('mongodb');
-
 app.get("/pets/:id", async (req, res) => {
   try {
     const id = req.params.id;
@@ -94,9 +107,7 @@ app.get("/pets/:id", async (req, res) => {
   }
 });
 
-
-
-// ✅ POST adoption request
+// ✅ GET all adoptions
 app.get("/adoptions", async (req, res) => {
   try {
     const adoptions = await adoptionsCollection.find().toArray();
@@ -106,13 +117,12 @@ app.get("/adoptions", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch adoptions", error });
   }
 });
- 
 
+// ✅ POST adoption request
 app.post("/adoptions", async (req, res) => {
   try {
     const adoption = req.body;
 
-    // Validate required fields
     if (!adoption.petId || !adoption.userEmail || !adoption.phone || !adoption.address) {
       return res.status(400).send({ message: "Missing required adoption fields" });
     }
@@ -125,6 +135,7 @@ app.post("/adoptions", async (req, res) => {
   }
 });
 
+// ✅ GET donation campaigns (paginated)
 app.get("/donations", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -144,11 +155,10 @@ app.get("/donations", async (req, res) => {
   }
 });
 
-
+// ✅ GET donation by ID
 app.get("/donations/:id", async (req, res) => {
   try {
     const id = req.params.id;
-
     const donation = await donationsCollection.findOne({ _id: new ObjectId(id) });
 
     if (!donation) {
@@ -162,21 +172,19 @@ app.get("/donations/:id", async (req, res) => {
   }
 });
 
-
+// ✅ Stripe donation logic
 app.post("/donate", async (req, res) => {
   const { amount, donorEmail, paymentMethodId, campaignId } = req.body;
 
   try {
-    // 1. Create payment intent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Convert to cents
+      amount: Math.round(amount * 100),
       currency: "usd",
       payment_method: paymentMethodId,
       confirm: true,
       receipt_email: donorEmail,
     });
 
-    // 2. Save donation in MongoDB (example logic)
     const donationData = {
       campaignId,
       donorEmail,
@@ -186,7 +194,6 @@ app.post("/donate", async (req, res) => {
 
     await donationsCollection.insertOne(donationData);
 
-    // 3. Update donation amount in campaign
     await campaignsCollection.updateOne(
       { _id: new ObjectId(campaignId) },
       { $inc: { donatedAmount: amount } }
@@ -199,18 +206,7 @@ app.post("/donate", async (req, res) => {
   }
 });
 
-
-
-// ✅ Protected Routes (optional auth)
-const protectedRoutes = require('./routes/protected.routes');
-app.use('/protected', protectedRoutes);
-
-// ✅ Root
-app.get('/', (req, res) => {
-  res.send('Pet Adoption Platform Server Running...');
-});
-
-// ✅ JWT Token Route
+// ✅ JWT Token route
 app.post("/jwt", (req, res) => {
   const user = req.body;
   const token = jwt.sign(user, process.env.JWT_SECRET, {
@@ -220,7 +216,7 @@ app.post("/jwt", (req, res) => {
   res.send({ token });
 });
 
-// ✅ Protected Test Route
+// ✅ JWT Protected test route
 app.get("/protected", (req, res) => {
   const authHeader = req.headers.authorization;
 
@@ -237,7 +233,12 @@ app.get("/protected", (req, res) => {
   });
 });
 
-// ✅ Start Server
+// ✅ Root route
+app.get('/', (req, res) => {
+  res.send('Pet Adoption Platform Server Running...');
+});
+
+// ✅ Start server
 app.listen(port, () => {
   console.log(`🚀 Server is running on port ${port}`);
 });
