@@ -22,6 +22,11 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
+const donationRoutes = require('./routes/donations');
+app.use('/donations', (req, res, next) => {
+  req.db = db; // inject db
+  next();
+}, donationRoutes);
 
 // MongoDB Collections
 let petsCollection;
@@ -135,7 +140,7 @@ app.post("/adoptions", async (req, res) => {
   }
 });
 
-// ✅ GET donation campaigns (paginated)
+// GET donations with pagination
 app.get("/donations", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -149,11 +154,23 @@ app.get("/donations", async (req, res) => {
       .limit(limit)
       .toArray();
 
-    res.send(donations);
+    res.send({ donations });
   } catch (error) {
-    res.status(500).send({ message: "Error fetching donations", error });
+    console.error("GET donations error:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
 });
+
+// POST donation
+app.post('/donations', async (req, res) => {
+  const donation = {
+    ...req.body,
+    createdAt: new Date()
+  };
+  const result = await donationsCollection.insertOne(donation);
+  res.send({ insertedId: result.insertedId });
+});
+
 
 // ✅ GET donation by ID
 app.get("/donations/:id", async (req, res) => {
@@ -205,6 +222,83 @@ app.post("/donate", async (req, res) => {
     res.status(500).send({ success: false, error: err.message });
   }
 });
+
+app.get("/mypets", async (req, res) => {
+  const email = req.query.email;
+  if (!email) {
+    return res.status(400).send({ message: "Email is required" });
+  }
+
+  try {
+    const result = await petsCollection.find({ addedBy: email }).toArray();
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+app.delete("/pets/:id", async (req, res) => {
+  const id = req.params.id;
+  const result = await petsCollection.deleteOne({ _id: new ObjectId(id) });
+  res.send(result);
+});
+
+app.patch("/pets/:id", async (req, res) => {
+  const id = req.params.id;
+  const updatedPet = req.body;
+
+  try {
+    const result = await petsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedPet }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).send({ message: "Pet not found or already up-to-date" });
+    }
+
+    res.send({ message: "Pet updated successfully" });
+  } catch (error) {
+    console.error("Error updating pet:", error);
+    res.status(500).send({ message: "Failed to update pet", error });
+  }
+});
+
+
+app.patch("/pets/adopt/:id", async (req, res) => {
+  const id = req.params.id;
+  const result = await petsCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { adopted: true } }
+  );
+  res.send(result);
+});
+
+// Get user's own campaigns
+app.get("/campaigns", async (req, res) => {
+  const email = req.query.email;
+  const campaigns = await campaignsCollection.find({ creatorEmail: email }).toArray();
+  res.send(campaigns);
+});
+
+// Pause/unpause campaign
+app.patch("/campaigns/pause/:id", async (req, res) => {
+  const id = req.params.id;
+  const { paused } = req.body;
+  const result = await campaignsCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { paused } }
+  );
+  res.send(result);
+});
+
+// Get donators for a campaign
+app.get("/donators/:id", async (req, res) => {
+  const id = req.params.id;
+  const donations = await donationsCollection.find({ campaignId: id }).toArray();
+  res.send(donations);
+});
+
 
 // ✅ JWT Token route
 app.post("/jwt", (req, res) => {
