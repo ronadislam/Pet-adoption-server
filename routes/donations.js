@@ -10,7 +10,7 @@ router.get("/", async (req, res) => {
       .collection("donations")
       .find({ "creator.email": email })
       .toArray();
-    res.send(donations);
+    res.send({donations});
   } catch (err) {
     res.status(500).send({ message: "Failed to fetch campaigns." });
   }

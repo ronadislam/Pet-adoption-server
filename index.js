@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
-const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
+const { MongoClient, ObjectId, ServerApiVersion } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
@@ -12,6 +12,9 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// Declare db globally so it can be accessed from routes
+let db;
+
 // MongoDB connection URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.gbi6src.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -20,13 +23,8 @@ const client = new MongoClient(uri, {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
-const donationRoutes = require('./routes/donations');
-app.use('/donations', (req, res, next) => {
-  req.db = db; // inject db
-  next();
-}, donationRoutes);
 
 // MongoDB Collections
 let petsCollection;
@@ -35,10 +33,11 @@ let donationsCollection;
 let campaignsCollection;
 let usersCollection;
 
+// ✅ MongoDB connect
 async function run() {
   try {
     await client.connect();
-    const db = client.db("petAdoption");
+    db = client.db("petAdoption");
 
     // Assign collections
     petsCollection = db.collection("pets");
@@ -53,6 +52,16 @@ async function run() {
   }
 }
 run();
+
+// ✅ Optional route injection (if using external routes file)
+const donationRoutes = require("./routes/donations");
+app.use("/donations", (req, res, next) => {
+  req.db = db;
+  next();
+}, donationRoutes);
+
+// --- All your routes stay as-is ---
+
 
 // ✅ POST new pet
 app.post("/pets", async (req, res) => {
@@ -139,6 +148,48 @@ app.post("/adoptions", async (req, res) => {
     res.status(500).send({ message: "Failed to save adoption request", error });
   }
 });
+
+
+    // ✅ 1. Get Donations Made by a User
+    app.get("/my-donations", async (req, res) => {
+      const email = req.query.email;
+      try {
+        const donations = await donationsCollection
+          .find({ "donators.email": email })
+          .toArray();
+
+        const myDonations = donations.map((donation) => {
+          const userDonation = donation.donators.find((d) => d.email === email);
+          return {
+            _id: donation._id,
+            petName: donation.petName,
+            petImage: donation.petImage,
+            amount: userDonation?.amount || 0,
+          };
+        });
+
+        res.send(myDonations);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch user donations" });
+      }
+    });
+
+    // ✅ 2. Refund Donation (Remove from donators array)
+    app.patch("/refund/:id", async (req, res) => {
+      const { id } = req.params;
+      const { email } = req.body;
+
+      try {
+        const result = await donationsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $pull: { donators: { email } } }
+        );
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Failed to refund donation" });
+      }
+    });
+
 
 // GET donations with pagination
 app.get("/donations", async (req, res) => {
@@ -278,7 +329,7 @@ app.patch("/pets/adopt/:id", async (req, res) => {
 app.get("/campaigns", async (req, res) => {
   const email = req.query.email;
   const campaigns = await campaignsCollection.find({ creatorEmail: email }).toArray();
-  res.send(campaigns);
+  res.send({campaigns});
 });
 
 // Pause/unpause campaign
@@ -296,7 +347,7 @@ app.patch("/campaigns/pause/:id", async (req, res) => {
 app.get("/donators/:id", async (req, res) => {
   const id = req.params.id;
   const donations = await donationsCollection.find({ campaignId: id }).toArray();
-  res.send(donations);
+  res.send({donations});
 });
 
 
