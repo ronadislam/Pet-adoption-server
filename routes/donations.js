@@ -16,6 +16,19 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Create a new donation campaign
+router.post("/", async (req, res) => {
+  const newCampaign = req.body;
+  try {
+    const result = await req.db.collection("donations").insertOne(newCampaign);
+    res.send(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Failed to create campaign." });
+  }
+});
+
+
 // Update campaign (edit)
 router.patch("/:id", async (req, res) => {
   const { id } = req.params;
