@@ -1,7 +1,7 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require ("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-require("dotenv").config();
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -14,10 +14,7 @@ app.use(express.json());
 // module.exports = app;
 
 
-// Root route
-app.get("/", (req, res) => {
-  res.send("Pet Adoption Server is running");
-});
+
 
 
 // MongoDB connection
@@ -34,7 +31,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
 
     // Collections
     const db = client.db("petAdoption");
@@ -158,6 +155,20 @@ app.patch('/users/ban/:id', async (req, res) => {
         res.status(500).json({ error: "Failed to fetch donations" });
       }
     });
+
+
+    app.post("/donations", async (req, res) => {
+  try {
+    const donationData = req.body; // ফর্ম থেকে পাঠানো ডেটা
+    const result = await donationsCollection.insertOne(donationData);
+    res.status(201).json(result);
+  } catch (error) {
+    console.error("Error creating donation:", error);
+    res.status(500).json({ error: "Failed to create donation" });
+  }
+});
+
+
 
     app.get("/donations/:id", async (req, res) => {
       try {
@@ -461,6 +472,10 @@ run().catch(console.dir);
 // Start server
 
 // module.exports = app;
+// Root route
+app.get("/", (req, res) => {
+  res.send("Pet Adoption Server is running");
+});
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
